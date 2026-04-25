@@ -1073,18 +1073,16 @@ function render() {
   document.getElementById('entriesList').innerHTML = filtered.map(e => {
     const visible = visiblePassIds.has(e.uid);
     const tagClass = CATEGORY_TAGS[e.category] || 'tag-default';
-    const passDisplay = visible ? e.pass : '••••••••';
-
     const isExpanded = expandedIds.has(e.uid);
     const isPinned = pinnedIds.has(e.uid);
     return `
-    <div class="entry-card${isExpanded ? ' expanded' : ''}${isPinned ? ' pinned-card' : ''}" onclick="toggleExpand('${e.uid}', event)">
+    <div class="entry-card${isExpanded ? ' expanded' : ''}${isPinned ? ' pinned-card' : ''}" data-uid="${e.uid}">
       <div class="entry-icon">${getIcon(e)}</div>
       <div class="entry-info">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
           <div class="entry-site">${escHtml(e.site)}</div>
           <span class="tag ${tagClass}">${e.category}</span>
-          <button onclick="togglePin('${e.uid}', event)" style="background:none;border:none;cursor:pointer;font-size:16px;padding:0;margin-left:auto;line-height:1;flex-shrink:0">${isPinned ? '⭐' : '☆'}</button>
+          <button class="pin-btn" data-uid="${e.uid}" style="background:none;border:none;cursor:pointer;font-size:16px;padding:0;margin-left:auto;line-height:1;flex-shrink:0">${isPinned ? '⭐' : '☆'}</button>
         </div>
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
           <span style="font-size:10px;color:var(--text-muted);font-family:'Nunito',sans-serif;letter-spacing:1px;min-width:18px;font-weight:700">ID</span>
@@ -1099,22 +1097,63 @@ function render() {
         ${isExpanded ? '▲' : '▼'}
       </div>
       ${isExpanded ? `
-      <div class="entry-expand open" onclick="event.stopPropagation()">
+      <div class="entry-expand open">
         <div class="expand-label">ID</div>
         <div class="expand-value">${escHtml(e.id_val || e.id)}</div>
         <div class="expand-label">パスワード</div>
-        <div class="expand-value${visible ? ' revealed' : ' masked'}" id="pw-${e.uid}">${visible ? escHtml(e.pass) : '••••••••••••'}</div>
+        <div class="expand-value${visible ? ' revealed' : ' masked'}">${visible ? escHtml(e.pass) : '••••••••••••'}</div>
         <div class="expand-btns">
-          <button class="expand-btn" onclick="copyId('${e.uid}', this)">IDをコピー</button>
-          <button class="expand-btn" onclick="copyPass('${e.uid}', this)">PWをコピー</button>
-          <button class="expand-btn ghost" onclick="togglePass('${e.uid}'); event.stopPropagation()">${visible ? '隠す' : 'PWを見る'}</button>
-          <button class="expand-btn ghost" onclick="editEntry('${e.uid}'); event.stopPropagation()">編集</button>
-          <button class="expand-btn ghost" style="color:var(--danger);border-color:var(--danger)" onclick="deleteEntry('${e.uid}'); event.stopPropagation()">削除</button>
+          <button class="expand-btn" data-action="copyId" data-uid="${e.uid}">IDをコピー</button>
+          <button class="expand-btn" data-action="copyPass" data-uid="${e.uid}">PWをコピー</button>
+          <button class="expand-btn ghost" data-action="togglePass" data-uid="${e.uid}">${visible ? '隠す' : 'PWを見る'}</button>
+          <button class="expand-btn ghost" data-action="edit" data-uid="${e.uid}">編集</button>
+          <button class="expand-btn ghost" data-action="delete" data-uid="${e.uid}" style="color:var(--danger);border-color:var(--danger)">削除</button>
         </div>
         ${e.note ? `<div style="font-size:12px;color:var(--text-muted);margin-top:12px;font-family:'Nunito',sans-serif">📝 ${escHtml(e.note)}</div>` : ''}
       </div>` : ''}
     </div>`;
   }).join('');
+
+  // イベント委任でカードのタップを処理
+  document.getElementById('entriesList').addEventListener('click', handleCardClick, { once: true });
+}
+
+function handleCardClick(e) {
+  // 再登録
+  const list = document.getElementById('entriesList');
+  if (list) list.addEventListener('click', handleCardClick, { once: true });
+
+  const btn = e.target.closest('[data-action]');
+  if (btn) {
+    e.stopPropagation();
+    const uid = btn.dataset.uid;
+    const action = btn.dataset.action;
+    if (action === 'copyId') copyId(uid, btn);
+    else if (action === 'copyPass') copyPass(uid, btn);
+    else if (action === 'togglePass') togglePass(uid);
+    else if (action === 'edit') editEntry(uid);
+    else if (action === 'delete') deleteEntry(uid);
+    return;
+  }
+
+  const pinBtn = e.target.closest('.pin-btn');
+  if (pinBtn) {
+    e.stopPropagation();
+    const uid = pinBtn.dataset.uid;
+    if (pinnedIds.has(uid)) pinnedIds.delete(uid);
+    else pinnedIds.add(uid);
+    savePinned();
+    render();
+    return;
+  }
+
+  const card = e.target.closest('.entry-card');
+  if (card && card.dataset.uid) {
+    const uid = card.dataset.uid;
+    if (expandedIds.has(uid)) expandedIds.delete(uid);
+    else { expandedIds.clear(); expandedIds.add(uid); }
+    render();
+  }
 }
 
 function escHtml(s) {
@@ -1127,24 +1166,9 @@ function togglePass(uid) {
   render();
 }
 
-function togglePin(uid, e) {
-  e.stopPropagation();
-  if (pinnedIds.has(uid)) pinnedIds.delete(uid);
-  else pinnedIds.add(uid);
-  savePinned();
-  render();
-}
+// togglePin → handleCardClick に統合
 
-function toggleExpand(uid, e) {
-  // ボタンやコピー操作はスキップ
-  if (e && e.target.tagName === 'BUTTON') return;
-  if (expandedIds.has(uid)) expandedIds.delete(uid);
-  else {
-    expandedIds.clear(); // 一度に1つだけ展開
-    expandedIds.add(uid);
-  }
-  render();
-}
+// toggleExpand → handleCardClick に統合
 
 async function copyToClipboard(text, btn, label) {
   try {
@@ -1425,7 +1449,7 @@ async function downloadFromDrive() {
     });
 
     if (search.result.files.length === 0) {
-      // No cloud data yet, upload local
+      // クラウドにデータなし → ローカルをアップロード
       await uploadToDrive();
       return;
     }
@@ -1437,8 +1461,12 @@ async function downloadFromDrive() {
     });
 
     const cloudData = typeof res.result === 'string' ? JSON.parse(res.result) : res.result;
+
+    // サンプルデータ（uid: sample1〜3）を除外して読み込む
     if (cloudData.entries) {
-      entries = cloudData.entries;
+      const sampleUids = new Set(['sample1', 'sample2', 'sample3']);
+      // サンプルデータと、パスワードが初期値のものを除外
+      entries = cloudData.entries.filter(e => !sampleUids.has(e.uid) && !['MyP@ssw0rd!','Tw1tterP@ss','Bank$ecure99'].includes(e.pass));
       localStorage.setItem('vault_entries', JSON.stringify(entries));
     }
     if (cloudData.customCats) {
@@ -1449,6 +1477,11 @@ async function downloadFromDrive() {
     const now = new Date().toLocaleTimeString('ja-JP', {hour:'2-digit', minute:'2-digit'});
     setDriveStatus('connected', `✓ 同期済み ${now}`);
     showToast('☁️ Google Drive から読み込みました！');
+
+    // サンプルが混じっていたらDriveも上書きしてきれいにする
+    if (cloudData.entries && cloudData.entries.some(e => ['sample1','sample2','sample3'].includes(e.uid))) {
+      await uploadToDrive();
+    }
   } catch(e) {
     console.error('Drive download error:', e);
     setDriveStatus('error', '読み込み失敗');
